@@ -138,8 +138,26 @@ def evaluate() -> dict:
     for name, value in metrics.items():
         print(f"  {name:<10} {value:.3f}")
 
+    # A dozen Bengali questions would vanish into a 48-question average, so
+    # report each document separately too.
+    groups = {}
+    for q in per_question:
+        groups.setdefault(q["document"], []).append(q)
+
+    print("\n  by document")
+    print(f"    {'document':<28} {'n':>3} {'r@1':>6} {'r@5':>6} {'mrr':>6}")
+    breakdown = {}
+    for name, items in sorted(groups.items()):
+        n = len(items)
+        r1 = sum(1 for q in items if q["rank"] == 1) / n
+        r5 = sum(1 for q in items if q["rank"] and q["rank"] <= 5) / n
+        mrr = sum(1 / q["rank"] for q in items if q["rank"]) / n
+        breakdown[name] = {"n": n, "recall@1": r1, "recall@5": r5, "mrr": mrr}
+        print(f"    {name:<28} {n:>3} {r1:>6.3f} {r5:>6.3f} {mrr:>6.3f}")
+
     return {
         "metrics": metrics,
+        "by_document": breakdown,
         "chunks": total_chunks,
         "questions": len(golden),
         "ranks": {q["id"]: q["rank"] for q in per_question},

@@ -242,7 +242,7 @@
         <input
           type="file"
           multiple
-          accept=".pdf,.txt,.md,.docx"
+          accept=".pdf,.txt,.md,.markdown,.docx,.json"
           class="hidden"
           id="file-input"
           onchange={(e) => handleFileUpload((e.target as HTMLInputElement).files!)}
@@ -253,7 +253,7 @@
           </svg>
           <p class="text-slate-300">Drag & drop files here</p>
           <p class="text-sm text-slate-500 mt-1">or click to browse</p>
-          <p class="text-xs text-slate-600 mt-2">PDF, TXT, MD, DOCX (max 10MB each)</p>
+          <p class="text-xs text-slate-600 mt-2">PDF, TXT, MD, DOCX, JSON (max 10MB each)</p>
         </label>
       </div>
 

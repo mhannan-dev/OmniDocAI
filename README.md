@@ -75,10 +75,16 @@ would make `recall@5` 1.0 by construction.
 Results are snapshotted in `eval/results/` so each change can be compared
 against the one before it.
 
-| Change | recall@1 | recall@3 | recall@5 | MRR |
-|---|---|---|---|---|
-| 01 Fixed-size chunking | **0.722** | 0.861 | 0.944 | **0.793** |
-| 02 Structure-aware chunking (T9) | 0.639 | **0.917** | **0.972** | 0.772 |
+| Change | Questions | recall@1 | recall@3 | recall@5 | MRR |
+|---|---|---|---|---|---|
+| 01 Fixed-size chunking | 36 | **0.722** | 0.861 | 0.944 | **0.793** |
+| 02 Structure-aware chunking (T9) | 36 | 0.639 | **0.917** | **0.972** | 0.772 |
+| 03 Bengali questions added | 48 | 0.479 | 0.792 | 0.979 | 0.653 |
+| 04 Multilingual embeddings | 48 | 0.438 | 0.729 | 0.896 | 0.597 |
+
+Rows 01-02 and 03-04 are separate series: adding 12 Bengali questions in 03
+changed the question set, so its numbers are a new starting point rather than a
+regression against 02.
 
 A deliberate trade. `search_document` retrieves `top_k=5` and puts **all five**
 chunks into the model's context, so recall@5 is what decides whether the model
@@ -91,3 +97,33 @@ recall@5 falls to 0.917 and recall@3 to 0.889.
 
 Still unretrieved: `X-Request-Id`, an exact identifier. That is the weakness
 hybrid search (T10 in `FeaturePlan.md`) exists to close.
+
+
+### Why the multilingual model, despite lower averages
+
+`all-MiniLM-L6-v2` is English-only. On a Bengali document it scored **recall@1
+of 0.000** - not one of twelve questions put the right chunk first. Its
+similarities collapsed into a 0.34-0.47 band: it could tell Bengali text from
+English text, but not one Bengali passage from another.
+
+`paraphrase-multilingual-MiniLM-L12-v2` (same 384 dimensions, 50+ languages)
+trades English accuracy for Bengali capability:
+
+| Document | recall@1 before | after | MRR before | after |
+|---|---|---|---|---|
+| bangladesh_districts.md (Bengali) | 0.000 | **0.250** | 0.296 | **0.481** |
+| employee_handbook.md (English) | **0.941** | 0.765 | **0.956** | 0.814 |
+| api_reference.md (English) | **0.545** | 0.273 | **0.697** | 0.508 |
+
+The corpus is three-quarters English, so the overall average follows English and
+falls. It is kept anyway: a store that cannot retrieve from Bengali files at all
+is broken for a bilingual user, whereas the English regression leaves retrieval
+merely less precise.
+
+A larger multilingual model (768-dim, 1 GB) was the obvious next experiment, but
+its download stalled at 8 KB in 45 seconds on this network and was abandoned.
+Worth retrying when bandwidth allows.
+
+Both remaining weak spots are lexical rather than semantic - English identifiers
+(`X-Request-Id`, `sk_test_`) and exact Bengali terms - which is what hybrid
+search (T10) addresses, in any script.

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI
 import chromadb
 from chromadb.config import Settings
-from chromadb.utils import embedding_functions
+from fastembed import TextEmbedding
 
 # Document parsing
 import pdfplumber
@@ -54,16 +54,21 @@ chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR), settings=Setting
 
 # Embeddings run locally (all-MiniLM-L6-v2, 384-dim). DeepSeek exposes no /embeddings
 # endpoint, so it is used for chat completion only.
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+# all-MiniLM-L6-v2 is English-only: on Bengali documents its similarities
+# collapsed into a narrow band and recall@1 measured 0.000. This model covers
+# 50+ languages at the same 384 dimensions.
+EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 # Bump to force every document to be re-indexed on the next startup.
-INDEX_VERSION = 4  # 4: .docx tables are extracted too
+INDEX_VERSION = 5  # 5: multilingual embedding model
 _embedding_fn = None
 
 
 def get_embedding_fn():
+    """Return a callable that turns a list of strings into a list of vectors."""
     global _embedding_fn
     if _embedding_fn is None:
-        _embedding_fn = embedding_functions.DefaultEmbeddingFunction()
+        model = TextEmbedding(EMBEDDING_MODEL)
+        _embedding_fn = lambda texts: [v.tolist() for v in model.embed(list(texts))]
     return _embedding_fn
 
 # asyncio keeps only weak references to tasks, so a fire-and-forget task can be
@@ -118,6 +123,42 @@ def get_collection_name(document_id: str) -> str:
     return f"doc_{document_id.replace('-', '_')}"
 
 
+def extract_json_text(file_path: Path) -> str:
+    """Flatten JSON into one `path: value` line per leaf.
+
+    Indexing raw JSON buries the content in punctuation, and a chunk boundary
+    can land mid-object. Flattening keeps every value on a line that still
+    names where it came from, which both embeds and chunks cleanly.
+
+    A .json file that does not parse is still text, so it is indexed as-is
+    rather than rejected.
+    """
+    raw = file_path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+    lines = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            if not node:
+                lines.append(f"{path}: (empty object)" if path else "(empty object)")
+            for key, value in node.items():
+                walk(value, f"{path}.{key}" if path else str(key))
+        elif isinstance(node, list):
+            if not node:
+                lines.append(f"{path}: (empty list)" if path else "(empty list)")
+            for i, value in enumerate(node):
+                walk(value, f"{path}[{i}]")
+        else:
+            value = "null" if node is None else str(node)
+            lines.append(f"{path}: {value}" if path else value)
+
+    walk(data, "")
+    return "\n".join(lines)
+
 def extract_docx_text(file_path: Path) -> str:
     """Read a .docx in document order, tables included.
 
@@ -154,6 +195,8 @@ def extract_text_from_file(file_path: Path, content_type: str) -> str:
                     if page_text:
                         text += page_text + "\n"
             return text.strip()
+        elif content_type == 'application/json':
+            return extract_json_text(file_path)
         elif content_type == 'text/plain' or content_type == 'text/markdown':
             return file_path.read_text(encoding='utf-8', errors='ignore')
         elif content_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
@@ -489,7 +532,7 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(400, "No filename provided")
 
     ext = Path(file.filename).suffix.lower()
-    supported_extensions = {'.pdf', '.txt', '.md', '.markdown', '.docx'}
+    supported_extensions = {'.pdf', '.txt', '.md', '.markdown', '.docx', '.json'}
 
     if ext not in supported_extensions:
         raise HTTPException(
@@ -503,6 +546,7 @@ async def upload_document(file: UploadFile = File(...)):
         '.md': 'text/markdown',
         '.markdown': 'text/markdown',
         '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.json': 'application/json',
     }
     content_type = file.content_type
     if not content_type or content_type == 'application/octet-stream':
@@ -512,7 +556,8 @@ async def upload_document(file: UploadFile = File(...)):
         'application/pdf',
         'text/plain',
         'text/markdown',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/json',
     }
     if content_type not in allowed_types:
         raise HTTPException(400, f"Unsupported file type: {content_type}")

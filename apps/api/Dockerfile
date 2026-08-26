@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Bake the local embedding model into the image so the container never
 # downloads it at runtime.
-RUN python -c "from chromadb.utils import embedding_functions as ef; ef.DefaultEmbeddingFunction()(['warmup'])"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2').embed(['warmup']).__next__()"
 
 COPY . .
 
