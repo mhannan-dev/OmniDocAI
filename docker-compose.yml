@@ -9,7 +9,8 @@ services:
       - ./apps/api:/app
       - ./storage:/app/storage
       # Seeded from the image; keeps the embedding model across container recreates.
-      - embedding_cache:/root/.cache/chroma
+      # fastembed caches here, not under ~/.cache.
+      - embedding_cache:/tmp/fastembed_cache
     env_file:
       - .env
     restart: unless-stopped
