@@ -1,0 +1,348 @@
+{
+  "_readme": [
+    "Relevance is marked by an `evidence` snippet, not by a chunk index.",
+    "Chunk indices shift the moment chunking changes (T9), which would make this",
+    "file meaningless exactly when it is needed most. A retrieved chunk counts as",
+    "relevant when it contains the evidence text, compared with whitespace",
+    "normalised and case ignored.",
+    "`answer` is unused by the retrieval metrics; it is there for RAGAS (T23)."
+  ],
+  "questions": [
+    {
+      "id": "hb-01",
+      "document": "employee_handbook.md",
+      "question": "How much paid annual leave do full-time staff get each year?",
+      "evidence": "22 days",
+      "answer": "22 days per calendar year."
+    },
+    {
+      "id": "hb-02",
+      "document": "employee_handbook.md",
+      "question": "What happens to leave I do not use by the end of the year?",
+      "evidence": "maximum of 8 days",
+      "answer": "Up to 8 days carry over; the rest is forfeited on 31 January."
+    },
+    {
+      "id": "hb-03",
+      "document": "employee_handbook.md",
+      "question": "When do I need a doctor's note for being off sick?",
+      "evidence": "from the fourth consecutive day",
+      "answer": "From the fourth consecutive day of absence."
+    },
+    {
+      "id": "hb-04",
+      "document": "employee_handbook.md",
+      "question": "How long is leave for a new parent who is the main carer?",
+      "evidence": "18 weeks at full pay",
+      "answer": "18 weeks at full pay for the primary caregiver."
+    },
+    {
+      "id": "hb-05",
+      "document": "employee_handbook.md",
+      "question": "Which policy covers parental leave requests?",
+      "evidence": "HR-204",
+      "answer": "Policy HR-204."
+    },
+    {
+      "id": "hb-06",
+      "document": "employee_handbook.md",
+      "question": "What does policy HR-311 govern?",
+      "evidence": "HR-311",
+      "answer": "Unpaid sabbatical, available after four years of service."
+    },
+    {
+      "id": "hb-07",
+      "document": "employee_handbook.md",
+      "question": "What is the daily food allowance when travelling in the US?",
+      "evidence": "$75 per day",
+      "answer": "Up to $75 per day in North America."
+    },
+    {
+      "id": "hb-08",
+      "document": "employee_handbook.md",
+      "question": "How much can a new joiner spend setting up a desk at home?",
+      "evidence": "$1,200",
+      "answer": "Up to $1,200 in the first year."
+    },
+    {
+      "id": "hb-09",
+      "document": "employee_handbook.md",
+      "question": "What is the exception code for a late expense claim?",
+      "evidence": "FIN-88",
+      "answer": "Exception code FIN-88."
+    },
+    {
+      "id": "hb-10",
+      "document": "employee_handbook.md",
+      "question": "Which asset class is the standard engineering laptop?",
+      "evidence": "LT-4471",
+      "answer": "Asset class LT-4471."
+    },
+    {
+      "id": "hb-11",
+      "document": "employee_handbook.md",
+      "question": "What laptop does the design team use?",
+      "evidence": "LT-5290",
+      "answer": "Asset class LT-5290, with a colour-calibrated display."
+    },
+    {
+      "id": "hb-12",
+      "document": "employee_handbook.md",
+      "question": "What happens if I lose my company laptop?",
+      "evidence": "IT-119",
+      "answer": "Charged at depreciated value under policy IT-119."
+    },
+    {
+      "id": "hb-13",
+      "document": "employee_handbook.md",
+      "question": "Can I buy my old laptop when it gets replaced?",
+      "evidence": "15% of its original price",
+      "answer": "Yes, at 15% of the original price."
+    },
+    {
+      "id": "hb-14",
+      "document": "employee_handbook.md",
+      "question": "How long must my password be?",
+      "evidence": "at least 14 characters",
+      "answer": "At least 14 characters."
+    },
+    {
+      "id": "hb-15",
+      "document": "employee_handbook.md",
+      "question": "Who do I call about a security problem out of hours?",
+      "evidence": "extension",
+      "answer": "The on-call security engineer on extension 4402."
+    },
+    {
+      "id": "hb-16",
+      "document": "employee_handbook.md",
+      "question": "How many days a week can I work from home?",
+      "evidence": "three days per week",
+      "answer": "Up to three days per week."
+    },
+    {
+      "id": "hb-17",
+      "document": "employee_handbook.md",
+      "question": "Do I have to tell anyone if I work from abroad for a month?",
+      "evidence": "21 days in a year",
+      "answer": "Yes, People Operations must be notified in advance."
+    },
+    {
+      "id": "api-01",
+      "document": "api_reference.md",
+      "question": "How do I tell a test key from a real one?",
+      "evidence": "sk_test_",
+      "answer": "Sandbox keys start with sk_test_ and production keys with sk_live_."
+    },
+    {
+      "id": "api-02",
+      "document": "api_reference.md",
+      "question": "What should I send support so they can find my failed call?",
+      "evidence": "X-Request-Id",
+      "answer": "The X-Request-Id header value."
+    },
+    {
+      "id": "api-03",
+      "document": "api_reference.md",
+      "question": "How many calls am I allowed per hour by default?",
+      "evidence": "1,000 requests per hour",
+      "answer": "1,000 requests per hour per token."
+    },
+    {
+      "id": "api-04",
+      "document": "api_reference.md",
+      "question": "How do I know how long to wait after being throttled?",
+      "evidence": "Retry-After",
+      "answer": "The Retry-After header gives the wait in seconds."
+    },
+    {
+      "id": "api-05",
+      "document": "api_reference.md",
+      "question": "Why am I throttled when I still have hourly quota left?",
+      "evidence": "60-second window",
+      "answer": "Burst traffic is smoothed over a 60-second window."
+    },
+    {
+      "id": "api-06",
+      "document": "api_reference.md",
+      "question": "How do I avoid charging a customer twice on a retry?",
+      "evidence": "idempotency_key",
+      "answer": "Send an idempotency_key; replays within 24 hours return the original response."
+    },
+    {
+      "id": "api-07",
+      "document": "api_reference.md",
+      "question": "How late can a payment still be refunded?",
+      "evidence": "180 days",
+      "answer": "Within 180 days of the original charge."
+    },
+    {
+      "id": "api-08",
+      "document": "api_reference.md",
+      "question": "How are webhook payloads signed?",
+      "evidence": "HMAC-SHA256",
+      "answer": "With HMAC-SHA256, in the Meridian-Signature header."
+    },
+    {
+      "id": "api-09",
+      "document": "api_reference.md",
+      "question": "How long do you keep retrying a webhook that fails?",
+      "evidence": "72 hours",
+      "answer": "Exponential backoff for 72 hours, then the event is dropped."
+    },
+    {
+      "id": "api-10",
+      "document": "api_reference.md",
+      "question": "When does money from a local sale actually arrive?",
+      "evidence": "two business days",
+      "answer": "Two business days for domestic transactions."
+    },
+    {
+      "id": "api-11",
+      "document": "api_reference.md",
+      "question": "What error do I get for sending 10.50 as an amount?",
+      "evidence": "amount_not_integer",
+      "answer": "HTTP 400 with error code amount_not_integer."
+    },
+    {
+      "id": "inc-01",
+      "document": "incident_report.md",
+      "question": "How long was ingestion broken?",
+      "evidence": "4 hours and 12 minutes",
+      "answer": "4 hours and 12 minutes."
+    },
+    {
+      "id": "inc-02",
+      "document": "incident_report.md",
+      "question": "How serious was the outage rated?",
+      "evidence": "SEV-2",
+      "answer": "SEV-2."
+    },
+    {
+      "id": "inc-03",
+      "document": "incident_report.md",
+      "question": "How many uploads had to be replayed afterwards?",
+      "evidence": "1,847 uploads",
+      "answer": "1,847 uploads were queued and replayed."
+    },
+    {
+      "id": "inc-04",
+      "document": "incident_report.md",
+      "question": "What actually caused the failure?",
+      "evidence": "from 32 to 4",
+      "answer": "The connection pool was cut from 32 to 4 while worker concurrency stayed at 16."
+    },
+    {
+      "id": "inc-05",
+      "document": "incident_report.md",
+      "question": "Why did staging not catch this before release?",
+      "evidence": "concurrency 2",
+      "answer": "Staging runs one worker at concurrency 2, which four connections serve fine."
+    },
+    {
+      "id": "inc-06",
+      "document": "incident_report.md",
+      "question": "How much time was lost chasing the wrong theory?",
+      "evidence": "roughly 25 minutes",
+      "answer": "About 25 minutes, spent rate-limiting an unrelated bulk import."
+    },
+    {
+      "id": "inc-07",
+      "document": "incident_report.md",
+      "question": "What is being done so this cannot happen again?",
+      "evidence": "AI-1",
+      "answer": "AI-1 adds a startup assertion that pool size is at least worker concurrency."
+    },
+    {
+      "id": "inc-08",
+      "document": "incident_report.md",
+      "question": "Who owns the dashboard change and when is it due?",
+      "evidence": "Due 4 April",
+      "answer": "The observability team, due 4 April."
+    },
+    {
+      "id": "bn-01",
+      "document": "bangladesh_districts.md",
+      "question": "রাজবাড়ী জেলার ইতিহাস কী?",
+      "evidence": "রাজবাড়ী পদ্মা নদী ও রেল যোগাযোগ",
+      "answer": "পদ্মা নদী ও রেল যোগাযোগের কারণে গুরুত্বপূর্ণ হয়ে ওঠে।"
+    },
+    {
+      "id": "bn-02",
+      "document": "bangladesh_districts.md",
+      "question": "বাংলাদেশের প্রাচীনতম নগর কোথায়?",
+      "evidence": "মহাস্থানগড়",
+      "answer": "বগুড়ায় অবস্থিত মহাস্থানগড়, প্রাচীন পুণ্ড্রনগর।"
+    },
+    {
+      "id": "bn-03",
+      "document": "bangladesh_districts.md",
+      "question": "সুন্দরবনের প্রবেশদ্বার কোন জেলা?",
+      "evidence": "খুলনা সুন্দরবনের প্রবেশদ্বার",
+      "answer": "খুলনা।"
+    },
+    {
+      "id": "bn-04",
+      "document": "bangladesh_districts.md",
+      "question": "চা বাগানের জন্য কোন জেলা বিখ্যাত?",
+      "evidence": "সিলেট চা বাগানের",
+      "answer": "সিলেট।"
+    },
+    {
+      "id": "bn-05",
+      "document": "bangladesh_districts.md",
+      "question": "রেশম শিল্পের জন্য পরিচিত জেলা কোনটি?",
+      "evidence": "রেশম শিল্পের জন্য বিখ্যাত",
+      "answer": "রাজশাহী।"
+    },
+    {
+      "id": "bn-06",
+      "document": "bangladesh_districts.md",
+      "question": "রানী ভবানী কোন জেলার সাথে সম্পর্কিত?",
+      "evidence": "রানী ভবানীর শাসন",
+      "answer": "নাটোর।"
+    },
+    {
+      "id": "bn-07",
+      "document": "bangladesh_districts.md",
+      "question": "কর্ণফুলী নদীর তীরে কোন শহর?",
+      "evidence": "কর্ণফুলী নদীর তীরে",
+      "answer": "চট্টগ্রাম।"
+    },
+    {
+      "id": "bn-08",
+      "document": "bangladesh_districts.md",
+      "question": "বাংলাদেশে মোট কতটি জেলা আছে?",
+      "evidence": "মোট ৬৪টি জেলা",
+      "answer": "৬৪টি জেলা, আটটি বিভাগে বিভক্ত।"
+    },
+    {
+      "id": "bn-09",
+      "document": "bangladesh_districts.md",
+      "question": "আয়তনে সবচেয়ে ছোট জেলা কোনটি?",
+      "evidence": "ক্ষুদ্রতম জেলা মেহেরপুর",
+      "answer": "মেহেরপুর।"
+    },
+    {
+      "id": "bn-10",
+      "document": "bangladesh_districts.md",
+      "question": "ময়নামতি ও শালবন বিহার কোথায়?",
+      "evidence": "ময়নামতি ও শালবন বিহারের",
+      "answer": "কুমিল্লায়।"
+    },
+    {
+      "id": "bn-11",
+      "document": "bangladesh_districts.md",
+      "question": "শস্যভাণ্ডার নামে পরিচিত জেলা কোনটি?",
+      "evidence": "শস্যভাণ্ডার",
+      "answer": "বরিশাল।"
+    },
+    {
+      "id": "bn-12",
+      "document": "bangladesh_districts.md",
+      "question": "তিস্তা নদীবিধৌত জেলা কোনটি?",
+      "evidence": "তিস্তা নদীবিধৌত",
+      "answer": "রংপুর।"
+    }
+  ]
+}

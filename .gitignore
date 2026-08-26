@@ -1,0 +1,23 @@
+# Env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+.svelte-kit/
+build/
+
+# Storage contents (folders themselves are tracked via .gitkeep)
+storage/chroma_db/*
+!storage/chroma_db/.gitkeep
+storage/uploads/*
+!storage/uploads/.gitkeep
+
+# OS / editors
+.DS_Store
+Thumbs.db
