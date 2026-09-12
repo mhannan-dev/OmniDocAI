@@ -77,14 +77,20 @@ against the one before it.
 
 | Change | Questions | recall@1 | recall@3 | recall@5 | MRR |
 |---|---|---|---|---|---|
-| 01 Fixed-size chunking | 36 | **0.722** | 0.861 | 0.944 | **0.793** |
-| 02 Structure-aware chunking (T9) | 36 | 0.639 | **0.917** | **0.972** | 0.772 |
+| 01 Fixed-size chunking | 36 | 0.722 | 0.861 | 0.944 | 0.793 |
+| 02 Structure-aware chunking (T9) | 36 | 0.639 | 0.917 | 0.972 | 0.772 |
 | 03 Bengali questions added | 48 | 0.479 | 0.792 | 0.979 | 0.653 |
 | 04 Multilingual embeddings | 48 | 0.438 | 0.729 | 0.896 | 0.597 |
+| 05 Hybrid search (BM25 + Dense RRF) (T10) | 48 | **0.583** | **0.917** | **0.958** | **0.751** |
 
-Rows 01-02 and 03-04 are separate series: adding 12 Bengali questions in 03
+Rows 01-02 and 03-05 are separate series: adding 12 Bengali questions in 03
 changed the question set, so its numbers are a new starting point rather than a
 regression against 02.
+
+Hybrid search (T10) combines dense multilingual embeddings with a custom
+multilingual BM25Okapi index via Reciprocal Rank Fusion (RRF). It resolved
+previous exact-match misses (`Retry-After`, `HR-311`, `Due 4 April`) and delivered a
++14.6% boost in recall@1 and +15.5% boost in MRR.
 
 A deliberate trade. `search_document` retrieves `top_k=5` and puts **all five**
 chunks into the model's context, so recall@5 is what decides whether the model
@@ -94,9 +100,6 @@ up ranking precision, so it is kept.
 
 An ablation confirmed the heading-path prefix carries its weight — without it,
 recall@5 falls to 0.917 and recall@3 to 0.889.
-
-Still unretrieved: `X-Request-Id`, an exact identifier. That is the weakness
-hybrid search (T10 in `FeaturePlan.md`) exists to close.
 
 
 ### Why the multilingual model, despite lower averages

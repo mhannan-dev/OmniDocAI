@@ -90,6 +90,11 @@
     }
   }
 
+  function selectAllDocuments() {
+    selectedDocId = '__all__';
+    window.dispatchEvent(new CustomEvent('doc-select', { detail: '__all__' }));
+  }
+
   function formatSize(bytes: number) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -164,6 +169,39 @@
         <p class="text-xs mt-1">Click "Add Documents" to start</p>
       </div>
     {:else}
+      {#if documents.some(d => d.status === 'ready')}
+        <button
+          type="button"
+          class={`w-full text-left p-3 rounded-xl transition-all flex items-center mb-2.5 border cursor-pointer ${
+            selectedDocId === '__all__'
+              ? 'bg-gradient-to-r from-indigo-950/90 via-indigo-900/60 to-purple-950/80 border-indigo-500 shadow-md shadow-indigo-500/10'
+              : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700/70 hover:border-slate-600'
+          }`}
+          onclick={selectAllDocuments}
+        >
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div class={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+              selectedDocId === '__all__'
+                ? 'bg-indigo-500 text-white shadow-sm'
+                : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+            }`}>
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between gap-1">
+                <p class="text-sm font-semibold truncate text-slate-100">All Documents</p>
+                <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded font-mono">
+                  {documents.filter(d => d.status === 'ready').length} files
+                </span>
+              </div>
+              <p class="text-xs text-slate-400 truncate mt-0.5">Cross-document workspace search</p>
+            </div>
+          </div>
+        </button>
+      {/if}
+
       {#each documents as doc (doc.id)}
         <div class="w-full">
           <div class="flex items-center gap-2">

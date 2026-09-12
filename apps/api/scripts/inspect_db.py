@@ -17,20 +17,33 @@ def section(title):
 
 
 def show_registry():
-    section("1. documents.json  (the document registry)")
-    db = STORAGE / "documents.json"
-    if not db.exists():
-        print("  (no documents yet)")
+    section("1. omnidoc.db (SQLite registry & chat history)")
+    db_file = STORAGE / "omnidoc.db"
+    if not db_file.exists():
+        print("  (omnidoc.db not found yet)")
         return
-    docs = json.loads(db.read_text(encoding="utf-8"))
-    print(f"  {len(docs)} document(s)\n")
-    for d in docs:
-        print(f"  - {d['name']}  [{d['status']}]")
-        print(f"      id     : {d['id']}")
-        print(f"      chunks : {d.get('chunks')}   model: {d.get('embeddingModel')}   v{d.get('indexVersion')}")
-        print(f"      file   : {d['path']}")
-        if d.get("error"):
-            print(f"      error  : {d['error']}")
+    conn = sqlite3.connect(str(db_file))
+    conn.row_factory = sqlite3.Row
+    try:
+        docs = conn.execute("SELECT * FROM documents ORDER BY uploadedAt DESC").fetchall()
+        print(f"  {len(docs)} document(s) in SQLite:\n")
+        for d in docs:
+            print(f"  - {d['name']}  [{d['status']}]")
+            print(f"      id     : {d['id']}")
+            print(f"      chunks : {d['chunks']}   model: {d['embeddingModel']}   v{d['indexVersion']}")
+            print(f"      file   : {d['path']}")
+            if d['error']:
+                print(f"      error  : {d['error']}")
+
+        convs = conn.execute("SELECT * FROM conversations").fetchall()
+        msgs = conn.execute("SELECT * FROM messages").fetchall()
+        print(f"\n  Chat History: {len(convs)} conversation(s), {len(msgs)} message(s)")
+
+        usage = conn.execute("SELECT COUNT(*) as cnt, SUM(total_tokens) as total, SUM(prompt_cache_hit_tokens) as hit FROM query_usage").fetchone()
+        if usage and usage['cnt']:
+            print(f"  Token Usage : {usage['cnt']} query runs, {usage['total'] or 0:,} total tokens, {usage['hit'] or 0:,} cache hit tokens")
+    finally:
+        conn.close()
 
 
 def show_uploads():

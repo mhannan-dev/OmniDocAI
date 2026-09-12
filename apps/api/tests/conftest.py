@@ -25,7 +25,18 @@ def client():
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    """Each test starts with an empty document registry."""
+    """Each test starts with an empty document registry and fresh SQLite database."""
     if main.DOCUMENTS_DB.exists():
         main.DOCUMENTS_DB.unlink()
+    db_path = main.db.get_db_path()
+    if db_path.exists():
+        db_path.unlink()
+    # Also clean up WAL / SHM files if any
+    wal = db_path.with_name(db_path.name + "-wal")
+    if wal.exists():
+        wal.unlink()
+    shm = db_path.with_name(db_path.name + "-shm")
+    if shm.exists():
+        shm.unlink()
+    main.db.init_db()
     yield

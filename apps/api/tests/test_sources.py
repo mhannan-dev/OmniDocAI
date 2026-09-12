@@ -78,3 +78,10 @@ def test_the_regression_case_late_facts_reach_the_model():
 
 def test_empty_source_list():
     assert preview_sources([]) == []
+
+
+def test_raw_content_retained_in_preview_sources():
+    chunk = "x" * 900
+    previews = preview_sources([source(chunk)])
+    assert previews[0]["raw_content"] == chunk
+    assert len(previews[0]["content"]) == LIMIT + 3

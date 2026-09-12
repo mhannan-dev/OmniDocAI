@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 import chromadb
@@ -22,6 +22,9 @@ import pdfplumber
 from docx import Document as DocxDocument
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+
+from app import db
+from app.search import hybrid_search, BM25Index, tokenize
 
 app = FastAPI(
     title="OmniDocAI API",
@@ -43,6 +46,7 @@ CHROMA_DIR = STORAGE_DIR / "chroma_db"
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
 DOCUMENTS_DB = STORAGE_DIR / "documents.json"
+db.init_db()
 
 # DeepSeek client
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -100,23 +104,30 @@ class Document(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     document_id: str
+    conversation_id: Optional[str] = None
+
+
+class CreateConversationRequest(BaseModel):
+    document_id: str
+    title: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     content: str
     sources: List[dict] = []
+    conversation_id: Optional[str] = None
 
 
 def load_documents() -> List[Document]:
-    if DOCUMENTS_DB.exists():
-        with open(DOCUMENTS_DB) as f:
-            return [Document(**d) for d in json.load(f)]
-    return []
+    return [Document(**d) for d in db.list_documents()]
 
 
 def save_documents(docs: List[Document]):
-    with open(DOCUMENTS_DB, 'w') as f:
-        json.dump([d.model_dump() for d in docs], f)
+    for d in docs:
+        if db.get_document(d.id):
+            db.update_document(d.id, **d.model_dump())
+        else:
+            db.insert_document(d.model_dump())
 
 
 def get_collection_name(document_id: str) -> str:
@@ -340,16 +351,8 @@ async def get_embeddings(texts: List[str]) -> List[List[float]]:
 
 
 def update_document(doc_id: str, **fields):
-    """Patch one document's record in place."""
-    docs = load_documents()
-    for d in docs:
-        if d.id == doc_id:
-            for key, value in fields.items():
-                setattr(d, key, value)
-            break
-    else:
-        return
-    save_documents(docs)
+    """Patch one document's record in place in SQLite."""
+    db.update_document(doc_id, **fields)
 
 
 def index_is_healthy(document: Document) -> bool:
@@ -415,55 +418,143 @@ async def index_document(document: Document):
             error=None,
         )
         print(f"Indexed {document.name}: {len(chunks)} chunks")
+        db.save_document_summary("__all__", "", [])
+        spawn(generate_document_summary_and_questions(document.id))
     except Exception as e:
         print(f"Indexing failed for {document.name}: {e}")
         update_document(document.id, status="error", error=str(e))
 
 
 async def search_document(document_id: str, query: str, top_k: int = 5) -> List[dict]:
-    """Search for relevant chunks in a document."""
+    """Search for relevant chunks in a document using Hybrid Search (BM25 + Dense with RRF)."""
+    if document_id == "__all__":
+        ready_docs = [d for d in db.list_documents() if d["status"] == "ready" and d["id"] != "__all__"]
+        if not ready_docs:
+            return []
+
+        all_ids = []
+        all_chunks = []
+        all_metadatas = []
+        dense_results_combined = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]]
+        }
+
+        query_embedding = await get_embeddings([query])
+
+        for doc in ready_docs:
+            col_name = get_collection_name(doc["id"])
+            try:
+                collection = chroma_client.get_collection(name=col_name)
+                total_count = collection.count()
+                if total_count == 0:
+                    continue
+
+                candidate_k = min(total_count, max(top_k * 2, 10))
+                dense_res = collection.query(
+                    query_embeddings=query_embedding,
+                    n_results=candidate_k,
+                    include=["documents", "metadatas", "distances"]
+                )
+                if dense_res.get("ids") and dense_res["ids"][0]:
+                    dense_results_combined["ids"][0].extend(dense_res["ids"][0])
+                    dense_results_combined["documents"][0].extend(dense_res["documents"][0])
+                    dense_results_combined["metadatas"][0].extend(dense_res["metadatas"][0])
+                    dense_results_combined["distances"][0].extend(dense_res["distances"][0])
+
+                all_data = collection.get(include=["documents", "metadatas"])
+                if all_data.get("documents"):
+                    all_chunks.extend(all_data["documents"])
+                    all_ids.extend(all_data["ids"])
+                    all_metadatas.extend(all_data["metadatas"])
+            except Exception:
+                continue
+
+        if not all_chunks:
+            return []
+
+        return hybrid_search(
+            query=query,
+            all_ids=all_ids,
+            all_chunks=all_chunks,
+            all_metadatas=all_metadatas,
+            dense_results=dense_results_combined,
+            top_k=top_k,
+            document_id="__all__"
+        )
+
     collection = chroma_client.get_or_create_collection(name=get_collection_name(document_id))
-    
+    total_count = collection.count()
+    if total_count == 0:
+        return []
+
+    # Retrieve candidate pool size for dense search
+    candidate_k = min(total_count, max(top_k * 3, 20))
     query_embedding = await get_embeddings([query])
     
-    results = collection.query(
+    dense_results = collection.query(
         query_embeddings=query_embedding,
-        n_results=top_k,
+        n_results=candidate_k,
         include=["documents", "metadatas", "distances"]
     )
     
-    sources = []
-    if results['documents'] and results['documents'][0]:
-        for i, doc in enumerate(results['documents'][0]):
-            metadata = results['metadatas'][0][i]
-            distance = results['distances'][0][i] if results['distances'] else 0
-            # Convert distance to similarity score (0-1)
-            score = max(0, 1 - distance)
-            sources.append({
-                "document_id": metadata.get("document_id", document_id),
-                "document_name": metadata.get("document_name", "Unknown"),
-                "content": doc,
-                "score": score
-            })
-    return sources
+    # Retrieve chunks and metadatas for BM25 indexing
+    all_data = collection.get(include=["documents", "metadatas"])
+    all_chunks = all_data.get("documents") or []
+    all_ids = all_data.get("ids") or []
+    all_metadatas = all_data.get("metadatas") or []
+
+    return hybrid_search(
+        query=query,
+        all_ids=all_ids,
+        all_chunks=all_chunks,
+        all_metadatas=all_metadatas,
+        dense_results=dense_results,
+        top_k=top_k,
+        document_id=document_id
+    )
 
 
 def preview_sources(sources: List[dict], limit: int = 500) -> List[dict]:
     """Shorten chunks for display only - never for the model context."""
     return [
-        {**s, "content": s["content"][:limit] + "..." if len(s["content"]) > limit else s["content"]}
+        {
+            **s,
+            "raw_content": s.get("content", ""),
+            "content": s["content"][:limit] + "..." if len(s["content"]) > limit else s["content"]
+        }
         for s in sources
     ]
 
 
-async def generate_chat_response(query: str, document_id: str):
-    docs = load_documents()
-    doc = next((d for d in docs if d.id == document_id), None)
+async def generate_chat_response(query: str, document_id: str, conversation_id: Optional[str] = None):
+    doc_dict = db.get_document(document_id)
 
-    if not doc:
+    if not doc_dict:
         yield f"data: {json.dumps({'error': 'Document not found'})}\n\n"
         yield "data: [DONE]\n\n"
         return
+
+    # Resolve or create conversation
+    if conversation_id:
+        conv = db.get_conversation(conversation_id)
+        if not conv:
+            conv = db.create_conversation(document_id)
+            conversation_id = conv["id"]
+    else:
+        conv = db.get_or_create_active_conversation(document_id)
+        conversation_id = conv["id"]
+
+    # Update conversation title if still default
+    db.update_conversation_title_if_default(conversation_id, query)
+
+    # Record user message in DB
+    user_msg = db.add_message(conversation_id=conversation_id, role="user", content=query)
+
+    # Immediately yield conversation_id so client knows what thread is active
+    yield f"data: {json.dumps({'conversation_id': conversation_id})}\n\n"
 
     if not deepseek_client:
         content = "DeepSeek API key not configured. Please add DEEPSEEK_API_KEY to your .env file."
@@ -471,6 +562,7 @@ async def generate_chat_response(query: str, document_id: str):
         for word in words:
             yield f"data: {json.dumps({'content': word + ' '})}\n\n"
             await asyncio.sleep(0.02)
+        db.add_message(conversation_id=conversation_id, role="assistant", content=content)
         yield "data: [DONE]\n\n"
         return
 
@@ -480,30 +572,79 @@ async def generate_chat_response(query: str, document_id: str):
     # Build context from sources
     context = "\n\n".join([f"[Source: {s['document_name']}]\n{s['content']}" for s in sources])
     
-    system_prompt = """You are a helpful assistant that answers questions based on the provided document context. 
-    Use only the information from the context to answer. If the answer isn't in the context, say so.
-    Cite sources using [Source: document_name] format."""
+    if document_id == "__all__":
+        system_prompt = """You are an intelligent document analyst providing cross-document synthesis and comparison across multiple files.
+Use only the information from the provided context to answer. 
+Synthesize information, compare and contrast differing details or viewpoints between documents where applicable, and cite each document accurately using [Source: document_name] format.
+If information is only present in one document, state which document contains it. If the answer isn't in the context, say so."""
+    else:
+        system_prompt = """You are a helpful assistant that answers questions based on the provided document context. 
+Use only the information from the context to answer. If the answer isn't in the context, say so.
+Cite sources using [Source: document_name] format."""
     
+    # Retrieve past conversation turns for multi-turn conversational memory (up to last 6 messages)
+    prev_messages = db.get_conversation_messages(conversation_id, limit=6)
+    llm_messages = [{"role": "system", "content": system_prompt}]
+    for m in prev_messages:
+        if m["id"] != user_msg["id"]:
+            llm_messages.append({"role": m["role"], "content": m["content"]})
+
     user_prompt = f"Context:\n{context}\n\nQuestion: {query}"
+    llm_messages.append({"role": "user", "content": user_prompt})
     
     try:
         stream = await deepseek_client.chat.completions.create(
             model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=llm_messages,
             stream=True,
-            temperature=0.3
+            temperature=0.3,
+            stream_options={"include_usage": True}
         )
         
         full_content = ""
+        usage_obj = None
         async for chunk in stream:
-            if chunk.choices[0].delta.content:
+            if chunk.choices and chunk.choices[0].delta.content:
                 content_piece = chunk.choices[0].delta.content
                 full_content += content_piece
                 yield f"data: {json.dumps({'content': content_piece})}\n\n"
+            if getattr(chunk, "usage", None):
+                usage_obj = chunk.usage
         
+        # Persist assistant response to DB
+        asst_msg = db.add_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=full_content,
+            sources=preview_sources(sources) if sources else None
+        )
+
+        # Record usage if present
+        if usage_obj:
+            prompt_tokens = getattr(usage_obj, "prompt_tokens", 0)
+            completion_tokens = getattr(usage_obj, "completion_tokens", 0)
+            total_tokens = getattr(usage_obj, "total_tokens", 0)
+            cache_hit = 0
+            cache_miss = 0
+            details = getattr(usage_obj, "prompt_tokens_details", None)
+            if details:
+                cache_hit = getattr(details, "cached_tokens", 0)
+            if hasattr(usage_obj, "prompt_cache_hit_tokens"):
+                cache_hit = getattr(usage_obj, "prompt_cache_hit_tokens", 0)
+            if hasattr(usage_obj, "prompt_cache_miss_tokens"):
+                cache_miss = getattr(usage_obj, "prompt_cache_miss_tokens", 0)
+
+            usage_record = db.record_query_usage(
+                conversation_id=conversation_id,
+                message_id=asst_msg["id"],
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                prompt_cache_hit_tokens=cache_hit,
+                prompt_cache_miss_tokens=cache_miss
+            )
+            yield f"data: {json.dumps({'usage': usage_record})}\n\n"
+
         # Send sources at the end
         if sources:
             yield f"data: {json.dumps({'sources': preview_sources(sources)})}\n\n"
@@ -526,6 +667,152 @@ async def list_documents():
     return {"documents": [d.model_dump() for d in docs]}
 
 
+@app.get("/documents/{document_id}/content")
+async def get_document_content(document_id: str):
+    doc_dict = db.get_document(document_id)
+    if not doc_dict:
+        raise HTTPException(404, "Document not found")
+    doc = Document(**doc_dict)
+    file_path = Path(doc.path)
+    if not file_path.exists():
+        raise HTTPException(404, "Source file not found on disk")
+    
+    text = extract_text_from_file(file_path, doc.type)
+    return {
+        "document": doc.model_dump(),
+        "content": text
+    }
+
+
+@app.get("/documents/{document_id}/file")
+async def download_document_file(document_id: str):
+    doc_dict = db.get_document(document_id)
+    if not doc_dict:
+        raise HTTPException(404, "Document not found")
+    doc = Document(**doc_dict)
+    file_path = Path(doc.path)
+    if not file_path.exists():
+        raise HTTPException(404, "Source file not found on disk")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=doc.name,
+        media_type=doc.type
+    )
+
+
+async def generate_document_summary_and_questions(document_id: str) -> dict:
+    """Generate or retrieve a 2-sentence executive summary and 3 suggested questions."""
+    if document_id == "__all__":
+        cached = db.get_document_summary("__all__")
+        if cached:
+            return cached
+        ready_docs = [d for d in db.list_documents() if d["status"] == "ready" and d["id"] != "__all__"]
+        doc_count = len(ready_docs)
+        if doc_count == 0:
+            return {
+                "summary": "No documents available yet. Upload documents to start searching and comparing across your workspace.",
+                "questions": []
+            }
+        doc_names = ", ".join([d["name"] for d in ready_docs[:4]])
+        if doc_count > 4:
+            doc_names += f" and {doc_count - 4} more"
+        summary = f"Workspace contains {doc_count} indexed document(s) ({doc_names}). You can search, compare, and synthesize information across all documents simultaneously."
+        questions = [
+            "Compare the main themes and key findings across all documents.",
+            "What are the common topics and main differences between these documents?",
+            "Provide an executive overview of all indexed documents in the workspace."
+        ]
+        db.save_document_summary("__all__", summary, questions)
+        return {"summary": summary, "questions": questions}
+
+    cached = db.get_document_summary(document_id)
+    if cached:
+        return cached
+
+    doc_dict = db.get_document(document_id)
+    if not doc_dict:
+        raise HTTPException(404, "Document not found")
+
+    file_path = Path(doc_dict["path"])
+    if not file_path.exists():
+        raise HTTPException(404, "Source file not found on disk")
+
+    text = extract_text_from_file(file_path, doc_dict["type"])
+    if not text.strip():
+        fallback = {
+            "summary": f"{doc_dict['name']} is ready for queries.",
+            "questions": [
+                "What is the main topic of this document?",
+                "Can you provide an overview of the key points?",
+                "What important details or conclusions are mentioned?"
+            ]
+        }
+        db.save_document_summary(document_id, fallback["summary"], fallback["questions"])
+        return fallback
+
+    sample_text = text[:3000].strip()
+    fallback_summary = sample_text[:180].replace("\n", " ").strip() + "..."
+    fallback_questions = [
+        "What are the main topics discussed in this document?",
+        "Can you summarize the key findings or details?",
+        "What important facts or figures are included in this document?"
+    ]
+
+    if not deepseek_client:
+        db.save_document_summary(document_id, fallback_summary, fallback_questions)
+        return {"summary": fallback_summary, "questions": fallback_questions}
+
+    prompt = f"""You are an intelligent document analyst. Analyze the following excerpt from a document and generate:
+1. A concise 2-sentence executive summary of the document in the SAME language as the document (e.g., Bengali for Bengali text, English for English text).
+2. Exactly 3 clickable starter questions that a user would likely ask about this document, in the SAME language as the document.
+
+Respond ONLY with valid JSON in this exact structure:
+{{
+  "summary": "2-sentence executive summary...",
+  "questions": [
+    "Question 1?",
+    "Question 2?",
+    "Question 3?"
+  ]
+}}
+
+Document Name: {doc_dict.get('name', 'Document')}
+Document Excerpt:
+{sample_text}
+"""
+    try:
+        response = await deepseek_client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that outputs only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
+        raw_json = response.choices[0].message.content.strip()
+        parsed = json.loads(raw_json)
+        summary = parsed.get("summary", "").strip() or fallback_summary
+        questions = parsed.get("questions", [])
+        if not isinstance(questions, list) or len(questions) == 0:
+            questions = fallback_questions
+        else:
+            questions = [str(q).strip() for q in questions[:3]]
+
+        db.save_document_summary(document_id, summary, questions)
+        return {"summary": summary, "questions": questions}
+    except Exception as e:
+        print(f"Warning: Failed to generate LLM summary for doc {document_id}: {e}")
+        db.save_document_summary(document_id, fallback_summary, fallback_questions)
+        return {"summary": fallback_summary, "questions": fallback_questions}
+
+
+@app.get("/documents/{document_id}/summary")
+async def get_document_summary_endpoint(document_id: str):
+    return await generate_document_summary_and_questions(document_id)
+
+
 @app.post("/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     if not file.filename:
@@ -537,7 +824,7 @@ async def upload_document(file: UploadFile = File(...)):
     if ext not in supported_extensions:
         raise HTTPException(
             400,
-            f"Unsupported file extension: '{ext}'. Supported: {', '.join(sorted(supported_extensions))}"
+            f"Unsupported file type: extension '{ext}' is not supported. Supported: {', '.join(sorted(supported_extensions))}"
         )
 
     mime_from_ext = {
@@ -583,9 +870,7 @@ async def upload_document(file: UploadFile = File(...)):
         path=str(save_path)
     )
 
-    docs = load_documents()
-    docs.append(doc)
-    save_documents(docs)
+    db.insert_document(doc.model_dump())
 
     # index_document flips the status to "ready" or "error" when it actually finishes.
     spawn(index_document(doc))
@@ -619,11 +904,12 @@ async def reindex_stale_documents():
 
 @app.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
-    docs = load_documents()
-    doc = next((d for d in docs if d.id == document_id), None)
+    doc_dict = db.get_document(document_id)
     
-    if not doc:
+    if not doc_dict:
         raise HTTPException(404, "Document not found")
+    
+    doc = Document(**doc_dict)
     
     # Delete file
     file_path = Path(doc.path)
@@ -636,9 +922,9 @@ async def delete_document(document_id: str):
     except Exception:
         pass
     
-    # Remove from documents list
-    docs = [d for d in docs if d.id != document_id]
-    save_documents(docs)
+    # Remove from SQLite (will cascade delete associated conversations and messages)
+    db.delete_document(document_id)
+    db.save_document_summary("__all__", "", [])
     
     return {"status": "deleted"}
 
@@ -646,7 +932,7 @@ async def delete_document(document_id: str):
 @app.post("/chat")
 async def chat(request: ChatRequest):
     return StreamingResponse(
-        generate_chat_response(request.query, request.document_id),
+        generate_chat_response(request.query, request.document_id, request.conversation_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -654,3 +940,47 @@ async def chat(request: ChatRequest):
             "X-Accel-Buffering": "no",
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Conversation & History Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/documents/{document_id}/conversations")
+async def list_document_conversations(document_id: str):
+    doc = db.get_document(document_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    conversations = db.list_conversations(document_id)
+    return {"conversations": conversations}
+
+
+@app.get("/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    conv = db.get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+    messages = db.get_conversation_messages(conversation_id)
+    return {"conversation": conv, "messages": messages}
+
+
+@app.post("/conversations")
+async def create_conversation_endpoint(request: CreateConversationRequest):
+    doc = db.get_document(request.document_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    conv = db.create_conversation(request.document_id, request.title)
+    return {"conversation": conv}
+
+
+@app.delete("/conversations/{conversation_id}")
+async def delete_conversation_endpoint(conversation_id: str):
+    success = db.delete_conversation(conversation_id)
+    if not success:
+        raise HTTPException(404, "Conversation not found")
+    return {"status": "deleted"}
+
+
+@app.get("/analytics/usage")
+async def get_analytics_usage():
+    return db.get_total_usage()

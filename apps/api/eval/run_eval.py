@@ -78,40 +78,61 @@ def build_index() -> dict:
     return indexed
 
 
-def rank_of_first_hit(question: str, document: str, evidence: str, top_k: int):
+def rank_of_first_hit(question: str, document: str, evidence: str, top_k: int, mode: str = "hybrid"):
     """1-based rank of the first retrieved chunk that answers the question.
 
     A chunk counts only if it comes from the expected document *and* contains
     the evidence, so a lucky match in an unrelated file is not scored as a hit.
     """
     collection = main.chroma_client.get_collection(name=CORPUS_COLLECTION)
+    total_count = collection.count()
 
-    result = collection.query(
-        query_embeddings=embed([question]),
-        n_results=min(top_k, collection.count()),
-        include=["documents", "metadatas"],
-    )
+    if mode == "dense":
+        result = collection.query(
+            query_embeddings=embed([question]),
+            n_results=min(top_k, total_count),
+            include=["documents", "metadatas"],
+        )
+        ranked_chunks = list(zip(result["documents"][0], result["metadatas"][0]))
+    else:
+        # Hybrid search: Dense + BM25 with RRF
+        candidate_k = min(total_count, max(top_k * 3, 20))
+        dense_results = collection.query(
+            query_embeddings=embed([question]),
+            n_results=candidate_k,
+            include=["documents", "metadatas"],
+        )
+        all_data = collection.get(include=["documents", "metadatas"])
+        sources = main.hybrid_search(
+            query=question,
+            all_ids=all_data["ids"],
+            all_chunks=all_data["documents"],
+            all_metadatas=all_data["metadatas"],
+            dense_results=dense_results,
+            top_k=top_k,
+        )
+        ranked_chunks = [(s["content"], {"document_name": s["document_name"]}) for s in sources]
+
     needle = normalise(evidence)
-    for position, (chunk, meta) in enumerate(
-        zip(result["documents"][0], result["metadatas"][0]), start=1
-    ):
+    for position, (chunk, meta) in enumerate(ranked_chunks, start=1):
         if meta["document_name"] == document and needle in normalise(chunk):
             return position
     return None
 
 
-def evaluate() -> dict:
+def evaluate(mode: str = "hybrid") -> dict:
     golden = json.loads(GOLDEN_SET.read_text(encoding="utf-8"))["questions"]
     indexed = build_index()
 
     total_chunks = sum(len(c) for c in indexed.values())
     print(f"Corpus   : {len(indexed)} documents, {total_chunks} chunks")
+    print(f"Mode     : {mode.upper()} search")
     print(f"Questions: {len(golden)}\n")
 
     per_question = []
     for item in golden:
         rank = rank_of_first_hit(
-            item["question"], item["document"], item["evidence"], max(KS)
+            item["question"], item["document"], item["evidence"], max(KS), mode=mode
         )
         per_question.append({**item, "rank": rank})
 
@@ -190,10 +211,13 @@ def main_cli() -> int:
     parser.add_argument("--compare", metavar="FILE", help="compare against saved results")
     parser.add_argument("--fail-under", type=float, metavar="X",
                         help="exit non-zero if recall@5 falls below X (for CI)")
+    parser.add_argument("--dense-only", action="store_true",
+                        help="run dense vector retrieval only (skipping BM25 hybrid)")
     args = parser.parse_args()
 
+    mode = "dense" if args.dense_only else "hybrid"
     try:
-        results = evaluate()
+        results = evaluate(mode=mode)
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
 
