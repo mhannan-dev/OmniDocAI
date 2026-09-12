@@ -17,7 +17,21 @@ storage/chroma_db/*
 !storage/chroma_db/.gitkeep
 storage/uploads/*
 !storage/uploads/.gitkeep
+storage/*.db
+storage/*.db-wal
+storage/*.db-shm
+storage/documents.json
+
+# Test & Cache
+.pytest_cache/
+apps/api/.pytest_cache/
+.coverage
+htmlcov/
 
 # OS / editors
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
