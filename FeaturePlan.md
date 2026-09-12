@@ -1,5 +1,4 @@
 # OmniDocAI — Feature Plan
-
 বর্তমান working scaffold থেকে একটা portfolio-grade RAG product পর্যন্ত রোডম্যাপ।
 নিচের প্রতিটা আইটেম এই বিল্ডে **আসলে দেখা** কোনো সমস্যা থেকে এসেছে — সাধারণ
 চেকলিস্ট থেকে নয়।
